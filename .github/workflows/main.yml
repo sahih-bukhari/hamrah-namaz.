@@ -1,0 +1,65 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find project (unzip if needed)
+        run: |
+          if [ -f package.json ]; then
+            echo "SRC=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          else
+            ZIP=$(ls -1 *.zip | head -n 1)
+            echo "Using $ZIP"
+            rm -rf "$RUNNER_TEMP/site" && mkdir "$RUNNER_TEMP/site"
+            unzip -q "$ZIP" -d "$RUNNER_TEMP/site"
+            DIR=$(find "$RUNNER_TEMP/site" -maxdepth 2 -name package.json -not -path '*/node_modules/*' | head -n 1 | xargs dirname)
+            echo "SRC=$DIR" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and build
+        working-directory: ${{ env.SRC }}
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Verify output
+        working-directory: ${{ env.SRC }}
+        run: |
+          ls -la dist
+          test -f dist/index.html
+          cp dist/index.html dist/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ env.SRC }}/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
